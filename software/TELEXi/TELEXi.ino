@@ -23,6 +23,11 @@
 
 // i2c pullup setting
 bool enablePullups = false;
+bool isLeader = true;
+int er301Address = 0x31;
+IntervalTimer i2cLeaderTimer;
+const int i2cLeaderTimerInterval = 1000; // ms
+uint8_t i2cMessageBuffer[6];
 
 // config inputs
 int configPins[] = { 2, 1, 0 };
@@ -111,10 +116,18 @@ void setup() {
   readTimer.begin(readInputs, 1000); // 500
 
   // enable i2c and connect the event callbacks
-  Wire.begin(I2C_SLAVE, configID, I2C_PINS_18_19, enablePullups ? I2C_PULLUP_INT : I2C_PULLUP_EXT, I2C_RATE_400); // I2C_RATE_2400 // I2C_PULLUP_EXT
-  Wire.onReceive(receiveEvent);  
-  Wire.onRequest(requestEvent);
-
+  if (isLeader) {
+    Wire.begin(I2C_MASTER, configID, I2C_PINS_18_19, enablePullups ? I2C_PULLUP_INT : I2C_PULLUP_EXT, I2C_RATE_400);
+  } else {
+    Wire.begin(I2C_SLAVE, configID, I2C_PINS_18_19, enablePullups ? I2C_PULLUP_INT : I2C_PULLUP_EXT, I2C_RATE_400); // I2C_RATE_2400 // I2C_PULLUP_EXT
+    Wire.onReceive(receiveEvent);  
+    Wire.onRequest(requestEvent);
+  }
+  
+  if (isLeader) {
+    delay(1500);
+    i2cLeaderTimer.begin(sendValuesOveri2c, i2cLeaderTimerInterval);
+  }
 }
 
 /*
@@ -360,5 +373,26 @@ void readCalibrationData(){
   
 }
 
+/*
+ * sends values over i2c when in leader mode
+ */
+void sendValuesOveri2c() {
+    for (int i = 0; i < 8; i++)
+        sendi2c(er301Address, 0, 0x11, i, inputValue[i]);
+}
 
+/*
+ * Sends an i2c command out to a follower when running in leader mode
+ */
+void sendi2c(uint8_t model, uint8_t deviceIndex, uint8_t cmd, uint8_t devicePort, int value)
+{
+  uint16_t valueTemp = (uint16_t)value;
+  i2cMessageBuffer[2] = valueTemp >> 8;
+  i2cMessageBuffer[3] = valueTemp & 0xff;
 
+  Wire.beginTransmission(model + deviceIndex);
+  i2cMessageBuffer[0] = cmd;
+  i2cMessageBuffer[1] = (uint8_t)devicePort;
+  Wire.write(i2cMessageBuffer, 4);
+  Wire.endTransmission();
+}
